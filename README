@@ -1,0 +1,28 @@
+== data-format
+
+With the DataFormat DSL you can describe binary data formats:
+
+it "should read an array" do
+	stream = StringStream.create("str\0",2,4363,0.5,66584,-1677.5)
+
+	d = DataFormat.description do
+		string :name
+		uint :arr_length
+
+		array(:things,:length => :arr_length) do
+			int :thing_id
+			float :value
+		end
+	end
+
+	data = d.read_from(stream)
+
+	data.name.should == "str"
+
+	data.arr_length.should == 2
+	data.things[0].thing_id.should == 4363
+	data.things[0].value.should == 0.5
+
+	data.things[1].thing_id.should == 66584
+	data.things[1].value.should == -1677.5
+end
