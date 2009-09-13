@@ -14,7 +14,7 @@ describe DataFormat do
 
 	it "should read primitive and store value in object" do
 		stream = StringStream.create(10)
-		pc = DataFormat::NumberSerializer.new(:uint,:attribute => 'size', :object => Struct.new(:size).new)
+		pc = DataFormat::NumberSerializer.new(:uint,:size, :object => Struct.new(:size).new)
 		pc.read(stream).should == 10
 		pc.object.size.should == 10
 	end
@@ -150,6 +150,26 @@ describe DataFormat do
 		data.items[0].value.should == "yes"
 		data.items[1].class.should == Item
 		data.items[1].value.should == "no"
+	end
+
+	it "should support conditional elements" do
+
+		d = DataFormat.description do
+			uint :extra_element?
+
+			optional(->{ extra_element? != 0 }) do
+				string :elem
+			end
+		end
+
+		stream1 = StringStream.create(1,"conditional\0")
+		stream2 = StringStream.create(0,"conditional\0")
+
+		data = d.read_from(stream1)
+		data.elem.should == "conditional"
+
+		data = d.read_from(stream2)
+		data.elem.should be_nil
 	end
 end
 

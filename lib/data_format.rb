@@ -28,10 +28,10 @@ module DataFormat
 		attr_accessor :type, :options
 		attr_accessor :object, :attribute, :errors
 
-		def initialize(type,options={})
+		def initialize(type,attribute=nil,options={})
 			self.type = type
 			self.object = options.delete :object
-			self.attribute = options.delete(:attribute).to_s
+			self.attribute = attribute.to_s if attribute
 			self.options = options || {}
 			self.errors = []
 		end
@@ -82,10 +82,6 @@ module DataFormat
 			Integers.member? self.type
 		end
 
-		def self.bytes_of_type(type)
-			PrimitiveSerializer.type_without_unsigned_letter(type)
-		end
-
 		# Returns a type(symbol) with the unsigned-indication letter removed
 		# :uint => :int
 		# :int => :int
@@ -94,7 +90,7 @@ module DataFormat
 		end
 
 		def self.is_signed_type?(type)
-			type.to_s[0] == "u"
+			type.to_s[0] != "u"
 		end
 
 		def type=(type)
@@ -161,7 +157,7 @@ module DataFormat
 
 		attr_accessor :magic_value
 
-		def initialize(type,options={})
+		def initialize(type,attribute=nil,options={})
 			self.type = type
 			self.magic_value = options[:value]
 			self.options = options || {}
@@ -236,12 +232,16 @@ module DataFormat
 			if options[:length]
 				# if length is a symbol, read the value of the attribute the symbol identifies
 				options[:length] = object.send(options[:length]) if options[:length].is_a? Symbol
+				# TODO validate length?
 			else
 				# no length given, so the length must be read from the stream
 				options[:length] = NumberSerializer.new(options[:length_field_type] || :uint).read(stream)
 			end
 
 			arr = []
+
+			raise "length < 0 " if options[:length] < 0
+			# TODO raise if length > max
 
 			options[:length].times do
 				entry = (options[:class] || OpenStruct).new # create the instance for the current entry
@@ -257,10 +257,33 @@ module DataFormat
 		end
 	end
 
+	class ConditionalSerializer < ComplexSerializer
+
+		Keywords = [:conditional,:optional]
+
+		attr_accessor :condition
+
+		def initialize(type,condition,&block)
+			super(type,nil,{})
+			self.condition = condition
+			self.serializers = Builder.new(&block).data_format.root_serializer.serializers# XXX use builder here or pass the serializers from outside?
+		end
+
+		def read(stream)
+			if object.instance_eval(&condition)
+				serializers.each do |s|
+					s.object = object
+					s.read(stream)
+				end
+			end
+		end
+
+	end
+
 	# 
 	class Builder
 
-		DefaultSerializers = [NumberSerializer,StringSerializer,ArraySerializer,MagicSerializer]
+		DefaultSerializers = [NumberSerializer,StringSerializer,ArraySerializer,MagicSerializer,ConditionalSerializer]
 
 		attr_accessor :data_format
 		attr_accessor :available_serializers
@@ -273,8 +296,8 @@ module DataFormat
 		
 		def method_missing(meth,*args,&block)
 			serializer = available_serializers.find{|ab| ab::Keywords.member? meth} || raise("no serializer found for '#{meth}'")
-			options = {:attribute => args.first}.merge!(args[1] || {})
-			data_format.root_serializer << serializer.new(meth,options,&block)
+			#options = {:attribute => args.first}.merge!(args[1] || {})
+			data_format.root_serializer << serializer.new(meth,*args,&block)
 			# return an object that can be used to add validation or evaluation blocks to the serializer
 		end
 	end
