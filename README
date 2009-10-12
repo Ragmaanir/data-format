@@ -7,9 +7,9 @@ it "should read an array" do
 
 	d = DataFormat.description do
 		string :name
-		uint :arr_length
+		int :arr_length
 
-		array(:things,:length => :arr_length) do
+		array(:things,length: arr_length) do
 			int :thing_id
 			float :value
 		end
@@ -25,4 +25,23 @@ it "should read an array" do
 
 	data.things[1].thing_id.should == 66584
 	data.things[1].value.should == -1677.5
+end
+
+The name string is null-terminated.
+
+You can also do validation by specifying ranges:
+
+it "simple format with options" do
+	stream = StringStream.create("asdfghjk",2,0.225)
+
+	d = DataFormat.description do
+		string	:name, length: 8.bytes
+		int			:int_value, range: 1..100
+		float		:float_value, range: 0.0..1.0
+	end
+
+	data = d.read_from(stream)
+	data.name.should == "asdfghjk"
+	data.int_value.should == 2
+	data.float_value.should == [0.225].pack("g").unpack("g").first
 end

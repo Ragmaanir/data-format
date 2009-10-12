@@ -139,7 +139,7 @@ describe DataFormat do
 			magic "1337"
 		end
 
-		lambda{ d.read_from(stream) }.should_not raise_error
+		expect{ d.read_from(stream) }.should_not raise_error
 	end
 
 	it "should read an array" do
