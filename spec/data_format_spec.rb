@@ -171,5 +171,67 @@ describe DataFormat do
 		data = d.read_from(stream2)
 		data.elem.should be_nil
 	end
+
+	it "should describe and load bitmap" do
+		d = DataFormat.description("bitmap") do
+			magic :bfType, :value => "BM"
+			uint :bfSize
+			uint :bfReserved
+			uint :bfOffBits
+
+			uint :biSize
+			uint :biWidth
+			int :biHeight
+			short :biPlanes
+			short :biBitCount
+			uint :biCompression
+			uint :biSizeImage
+			uint :biXPelsPerMeter
+			uint :biYPelsPerMeter
+			uint :biClrUsed
+			uint :biClrImportant
+
+			conditional(->{ biCompression == BI_BITFIELDS }) do
+				uint :red_bitmask
+				uint :green_bitmask
+				uint :blue_bitmask
+			end
+
+			#* Wenn biClrUsed=0:
+			#      o Wenn biBitCount=1, 4 oder 8: Es folgt eine Farbtabelle mit 2^biBitCount Einträgen.
+			#      o Ansonsten: Es folgt keine Farbtabelle.
+			#* Ansonsten: Es folgt eine Farbtabelle mit biClrUsed Einträgen.
+			conditional(->{ biClrUsed == 0 }) do
+				conditional(->{ [1,4,8].member? biBitCount }) do
+					array(length: ->{ 2**biBitCount }) do
+						byte :red
+						byte :green
+						byte :blue
+						byte :zero
+					end
+				end
+			end.otherwise do
+				array(length: ->{ biClrUsed }) do
+					byte :red
+					byte :green
+					byte :blue
+					byte :zero
+				end
+			end
+
+			at :bfOffBits do
+				array(length: -> { biCompression == BI_RGB ? biWidth * biHeight * biBitCount/8 : biSizeImage }) do
+					distinguish :biCompression do
+						in_case(BI_BITFIELDS) do
+
+						end
+						in_case(BI_RGB) do
+							
+						end
+					end
+				end
+			end
+		end
+	end
 end
 

@@ -296,7 +296,6 @@ module DataFormat
 		
 		def method_missing(meth,*args,&block)
 			serializer = available_serializers.find{|ab| ab::Keywords.member? meth} || raise("no serializer found for '#{meth}'")
-			#options = {:attribute => args.first}.merge!(args[1] || {})
 			data_format.root_serializer << serializer.new(meth,*args,&block)
 			# return an object that can be used to add validation or evaluation blocks to the serializer
 		end
