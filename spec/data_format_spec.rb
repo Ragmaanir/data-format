@@ -7,19 +7,32 @@ describe DataFormat do
 
 	it "should read primitive" do
 		stream = StringStream.create(10)
-		pc = DataFormat::NumberSerializer.new(:uint)
-		
-		pc.read(stream).should == 10
+		object = OpenStruct.new
+		context = DataFormat::SerializationContext.new(:read,object,stream)
+		pc = DataFormat::IntegerSerializer.new(context)
+
+		pc.read(:uint,:attr,4.bytes).should == 10
 	end
 
 	it "should read primitive and store value in object" do
 		stream = StringStream.create(10)
-		pc = DataFormat::NumberSerializer.new(:uint,:size, :object => Struct.new(:size).new)
-		pc.read(stream).should == 10
-		pc.object.size.should == 10
+		object = OpenStruct.new
+		context = DataFormat::SerializationContext.new(:read,object,stream)
+		pc = DataFormat::IntegerSerializer.new(context)
+
+		pc.read(:uint,:attr,4.bytes).should == 10
+		object.attr.should == 10
 	end
 
-	it "should create format of primitives" do
+	it "should create an empty format" do
+		d = DataFormat.description("empty-format") do
+
+		end
+
+		d.name.should == "empty-format"
+	end
+
+	it "should create a simple format of primitives and read it from a stream" do
 		stream = StringStream.create(1337,-0.1337)
 		
 		d = DataFormat.description do
@@ -28,17 +41,53 @@ describe DataFormat do
 		end
 
 		data = d.read_from(stream)
+		
 		data.the_id.should == 1337
 		data.value.should == [-0.1337].pack("g").unpack("g").first
 	end
 
-	it "simple format" do
+	it "should read a null-terminated string from stream" do
+		stream = StringStream.create("asd\0")
+
+		d = DataFormat.description do
+			string	:name
+		end
+
+		data = d.read_from(stream)
+		data.name.should == "asd"
+	end
+	
+	it "should read a fixed-length string from stream" do
+		stream = StringStream.create("asdasd")
+
+		d = DataFormat.description do
+			string	:name, length: 6.bytes
+		end
+
+		data = d.read_from(stream)
+		data.name.should == "asdasd"
+	end
+
+	it "should read a string from stream with the length stored in the stream" do
+		stream = StringStream.create(6,"asdasd")
+
+		d = DataFormat.description do
+			int :str_length
+			string	:name, length: str_length.bytes
+		end
+
+		data = d.read_from(stream)
+		data.name.should == "asdasd"
+	end
+
+
+	it "should read various values" do
 		stream = StringStream.create("asd\0",1337,-0.1337)
 
 		d = DataFormat.description do
-			string :name
-			uint :int_value
-			float :float_value
+			string	:name
+			int			:int_value
+			float		:float_value
 		end
 
 		data = d.read_from(stream)
@@ -51,9 +100,9 @@ describe DataFormat do
 		stream = StringStream.create("asdfghjk",2,0.225)
 
 		d = DataFormat.description do
-			string :name, :length => 8
-			uint :int_value, :min => 1, :max => 100
-			float :float_value, :min => 0.0, :max => 1.0
+			string	:name, length: 8.bytes
+			int			:int_value, range: 1..100
+			float		:float_value, range: 0.0..1.0
 		end
 
 		data = d.read_from(stream)
@@ -66,35 +115,31 @@ describe DataFormat do
 		stream = StringStream.create(0,-0.5)
 
 		d = DataFormat.description do
-			uint :int_value, :min => 1, :max => 100
-			float :float_value, :min => 0.0, :max => 1.0
+			int			:int_value, range: 1..100
+			float		:float_value, range: 0.0..1.0
 		end
 		
-		data = d.read_from(stream)
-		
-		d.root_serializer[:int_value].errors.should include("min")
-		d.root_serializer[:float_value].errors.should include("min")
+		expect{ d.read_from(stream) }.to raise_error(DataFormat::MalformedFileError)
 	end
 
 	it "should validate magic number and raise" do
 		stream = StringStream.create(0)
 
 		d = DataFormat.description do
-			# magic 1337
-			magic :magic_number, :value => 1337
+			magic "1337"
 		end
 
-		lambda{d.read_from(stream)}.should raise_error(DataFormat::MagicSerializer::MagicStringError)
+		expect{ d.read_from(stream) }.to raise_error(DataFormat::MagicMismatchError)
 	end
 
 	it "should validate magic string and pass" do
 		stream = StringStream.create("1337")
 
 		d = DataFormat.description do
-			magic :magic_number, :value => "1337"
+			magic "1337"
 		end
 
-		lambda{d.read_from(stream)}.should_not raise_error
+		lambda{ d.read_from(stream) }.should_not raise_error
 	end
 
 	it "should read an array" do
@@ -102,9 +147,9 @@ describe DataFormat do
 		
 		d = DataFormat.description do
 			string :name
-			uint :arr_length
+			int :arr_length
 
-			array(:things,:length => :arr_length) do
+			array(:things,length: arr_length) do
 				int :thing_id
 				float :value
 			end
@@ -125,7 +170,7 @@ describe DataFormat do
 	it "should read an object from string" do
 		stream = StringStream.create("the name\0",100,2,"yes\0","no\0")
 		class ItemList
-			attr_accessor :name, :max_size, :items
+			attr_accessor :name, :max_size, :arr_len, :items
 		end
 
 		class Item
@@ -136,9 +181,10 @@ describe DataFormat do
 
 		d = DataFormat.description do
 			string :name
-			uint :max_size
+			int :max_size, 4.bytes
+			int :arr_len, 4.bytes
 
-			array(:items,:class => item_cls) do
+			array(:items, length: arr_len, class: item_cls) do
 				string :value
 			end
 		end
@@ -155,9 +201,9 @@ describe DataFormat do
 	it "should support conditional elements" do
 
 		d = DataFormat.description do
-			uint :extra_element?
+			int :extra_element?, 4.bytes
 
-			optional(->{ extra_element? != 0 }) do
+			if(extra_element? != 0)
 				string :elem
 			end
 		end
@@ -174,7 +220,12 @@ describe DataFormat do
 
 	it "should describe and load bitmap" do
 		d = DataFormat.description("bitmap") do
-			magic :bfType, :value => "BM"
+			BI_RGB = 0
+			RLE_8 = 1
+			RLE_4 = 2
+			BI_BITFIELDS = 3
+
+			magic "BM"
 			uint :bfSize
 			uint :bfReserved
 			uint :bfOffBits
@@ -182,16 +233,16 @@ describe DataFormat do
 			uint :biSize
 			uint :biWidth
 			int :biHeight
-			short :biPlanes
-			short :biBitCount
-			uint :biCompression
+			int :biPlanes, 2.bytes
+			int :biBitCount, 2.bytes
+			uint :biCompression, range: 0..3
 			uint :biSizeImage
 			uint :biXPelsPerMeter
 			uint :biYPelsPerMeter
 			uint :biClrUsed
 			uint :biClrImportant
 
-			conditional(->{ biCompression == BI_BITFIELDS }) do
+			if(biCompression == BI_BITFIELDS)
 				uint :red_bitmask
 				uint :green_bitmask
 				uint :blue_bitmask
@@ -201,17 +252,17 @@ describe DataFormat do
 			#      o Wenn biBitCount=1, 4 oder 8: Es folgt eine Farbtabelle mit 2^biBitCount Einträgen.
 			#      o Ansonsten: Es folgt keine Farbtabelle.
 			#* Ansonsten: Es folgt eine Farbtabelle mit biClrUsed Einträgen.
-			conditional(->{ biClrUsed == 0 }) do
-				conditional(->{ [1,4,8].member? biBitCount }) do
-					array(length: ->{ 2**biBitCount }) do
+			if(biClrUsed == 0)
+				if([1,4,8].member? biBitCount)
+					array(:color_table, length: 2**biBitCount) do
 						byte :red
 						byte :green
 						byte :blue
 						byte :zero
 					end
 				end
-			end.otherwise do
-				array(length: ->{ biClrUsed }) do
+			else
+				array(:color_table, length: biClrUsed) do
 					byte :red
 					byte :green
 					byte :blue
@@ -219,19 +270,28 @@ describe DataFormat do
 				end
 			end
 
-			at :bfOffBits do
-				array(length: -> { biCompression == BI_RGB ? biWidth * biHeight * biBitCount/8 : biSizeImage }) do
-					distinguish :biCompression do
-						in_case(BI_BITFIELDS) do
-
-						end
-						in_case(BI_RGB) do
-							
-						end
+			at(bfOffBits) do
+				array(:data, length: biCompression == BI_RGB ? biWidth * biHeight * biBitCount/8 : biSizeImage) do
+					case biCompression
+						when BI_BITFIELDS
+						when BI_RGB
+							case biBitCount
+								when 1,4,8
+								when 16
+								when 24
+								when 32
+							end
+						when RLE_4
+						when RLE_8
 					end
 				end
 			end
-		end
+
+			# FIXME implement
+			
+		end # end format
+
 	end
+
 end
 
